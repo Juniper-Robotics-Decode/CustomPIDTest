@@ -132,8 +132,7 @@ public class PIDs extends LinearOpMode {
             }
             telemetry.update();
         }
-
-        wheel.setPower(0);
+        PIDVel(0);
     }
 
     private double calculateErrorP(double target,double current){
