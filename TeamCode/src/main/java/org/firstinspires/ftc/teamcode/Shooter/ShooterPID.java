@@ -6,115 +6,109 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
-
 import com.qualcomm.robotcore.util.ElapsedTime;
-
 import java.io.File;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 
-@TeleOp
+@TeleOp(name="ShooterPID")
 public class ShooterPID extends LinearOpMode {
 
     DcMotorEx wheel;
     ElapsedTime timer = new ElapsedTime();
+    ElapsedTime runtime = new ElapsedTime();
+
+    public static double p = 0.0015;
+    public static double i = 0.0035;
+    public static double d = 0.0004;
 
     double target = 2500;
     double integralSum = 0;
     double lastError = 0;
-
-    double p = 0.01;
-    double i = 0.001;
-    double d = 0.0001;
-    double f = 0.00015;
-
-    int count = 0;
-    boolean ready = true;
-    boolean dataCollected = false;
-
-    File logFile;
+    double CPM = 28;
 
     @Override
     public void runOpMode() {
         wheel = hardwareMap.get(DcMotorEx.class, "wheel");
+        wheel.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         wheel.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        logFile = new File(String.format("%s/FIRST/shooterpid.csv", Environment.getExternalStorageDirectory().getAbsolutePath()));
+        ArrayList<String[]> dataLog = new ArrayList<>();
+        dataLog.add(new String[]{"Time", "Target", "Actual", "Error", "Power"});
 
         waitForStart();
         timer.reset();
+        runtime.reset();
 
-        if (!dataCollected) {
-            collectShooterData(7500);
-            dataCollected = true;
-        } else {
-            telemetry.addData("-", "DATA COLLECTION FINISHED");
-            telemetry.update();
-        }
-    }
+        for (int j = 0; j < 5000 && opModeIsActive(); j++) {
 
-    public void collectShooterData(int data) {
-        ArrayList<String[]> dataArray = new ArrayList<>();
-        dataArray.add(new String[]{"Time", "Target", "Actual", "Error", "Power"});
-        ElapsedTime sampleTimer = new ElapsedTime();
+            if (gamepad1.cross) {
+                integralSum = 0;
+                lastError = 0;
+            }
+            if (gamepad1.dpad_up) target += 5;
+            if (gamepad1.dpad_down) target -= 5;
 
-        for (int j = 0; j < data; j++) {
-            double currentvel = wheel.getVelocity();
-
-            double error = target - currentvel;
+            double actualTPS = wheel.getVelocity();
+            double actualRPM = (actualTPS / CPM) * 60;
+            double error = target - actualRPM;
             double dt = timer.seconds();
+            if (dt <= 0) dt = 0.001;
             timer.reset();
 
-            if (Math.abs(error) < 100) {
-                integralSum = integralSum + (error * dt);
+            if (Math.abs(error) < 800) {
+                integralSum += (error * dt);
             }
+
+            if (integralSum > 2000) integralSum = 2000;
+            if (integralSum < -2000) integralSum = -2000;
 
             double derivative = (error - lastError) / dt;
             lastError = error;
-            double power = (p * error) + (i * integralSum) + (d * derivative) + (f * target);
+
+            double power = (p * error) + (i * integralSum) + (d * derivative);
 
             if (power > 1) power = 1;
-            if (power < 0) power = 0;
+            if (power < -1) power = -1;
             wheel.setPower(power);
 
-            if (Math.abs(error) < 50 && ready) {
-                ready = false;
-                count = count + 1;
-            }
-            if (Math.abs(error) > 150) {
-                ready = true;
-            }
-
-            dataArray.add(new String[]{
-                    String.valueOf(sampleTimer.seconds()),
+            dataLog.add(new String[]{
+                    String.valueOf(runtime.seconds()),
                     String.valueOf(target),
-                    String.valueOf(currentvel),
+                    String.valueOf(actualRPM),
                     String.valueOf(error),
                     String.valueOf(power)
             });
 
-            telemetry.addData("Target", target);
-            telemetry.addData("Actual", currentvel);
+            telemetry.addData("Status", "Recording " + j + "/5000");
+            telemetry.addData("Target Speed", target);
+            telemetry.addData("Actual Speed", actualRPM);
             telemetry.addData("Error", error);
-            telemetry.addData("Count", count);
-            if (Math.abs(error) < 50) {
-                telemetry.addData("Fire?", "Ready");
-            } else {
-                telemetry.addData("Fire?", "Spinning back up to speed");
-            }
-            telemetry.addData("Progress", j + " / " + data);
+            telemetry.addData("Power %", power * 100);
             telemetry.update();
-
-            if (!opModeIsActive()) break;
         }
 
-        try (FileWriter fw = new FileWriter(logFile);
-             CSVWriter writer = new CSVWriter(fw)) {
-            writer.writeAll(dataArray);
-        } catch (IOException e) {
-            telemetry.addData("Error writing CSV", e.getMessage());
+        wheel.setPower(0);
+        sleep(10);
+        saveCSV(dataLog);
+    }
+
+    private void saveCSV(ArrayList<String[]> data) {
+        try {
+            File path = new File(Environment.getExternalStorageDirectory().getAbsolutePath());
+            File file = new File(path, "2500updatedtest1.csv");
+
+            CSVWriter writer = new CSVWriter(new FileWriter(file));
+            writer.writeAll(data);
+            writer.close();
+            telemetry.addData("Status", "Saved to " + file.getAbsolutePath());
             telemetry.update();
+            sleep(2000);
+
+        } catch (Exception e) {
+            telemetry.addData("Error", e.getMessage());
+            telemetry.update();
+            sleep(5000);
         }
     }
 }
